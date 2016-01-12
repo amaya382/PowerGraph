@@ -902,6 +902,51 @@ namespace graphlab {
     }
 
 
+    bool write_edge(vertex_id_type source, vertex_id_type target,
+                  const EdgeData& edata = EdgeData()) {
+
+#ifndef USE_DYNAMIC_LOCAL_GRAPH
+      if(finalized) {
+        logstream(LOG_FATAL)
+          << "\n\tAttempting to add an edge to a finalized graph."
+          << "\n\tEdges cannot be added to a graph after finalization."
+          << std::endl;
+      }
+#else
+      finalized = false;
+#endif
+      if(source == vertex_id_type(-1)) {
+        logstream(LOG_ERROR)
+          << "\n\tThe source vertex with id vertex_id_type(-1)\n"
+          << "\tor unsigned value " << vertex_id_type(-1) << " in edge \n"
+          << "\t(" << source << "->" << target << ") is not allowed.\n"
+          << "\tThe -1 vertex id is reserved for internal use."
+          << std::endl;
+        return false;
+      }
+      if(target == vertex_id_type(-1)) {
+        logstream(LOG_ERROR)
+          << "\n\tThe target vertex with id vertex_id_type(-1)\n"
+          << "\tor unsigned value " << vertex_id_type(-1) << " in edge \n"
+          << "\t(" << source << "->" << target << ") is not allowed.\n"
+          << "\tThe -1 vertex id is reserved for internal use."
+          << std::endl;
+        return false;
+      }
+      if(source == target) {
+        logstream(LOG_ERROR)
+          << "\n\tTrying to add self edge (" << source << "->" << target << ")."
+          << "\n\tSelf edges are not allowed."
+          << std::endl;
+        return false;
+      }
+      ASSERT_NE(ingress_ptr, NULL);
+
+      std::cout << source << "\t" << target << std::endl;
+      return true;
+   }
+
+
    /**
     * \brief Performs a map-reduce operation on each vertex in the
     * graph returning the result.
@@ -2410,6 +2455,40 @@ namespace graphlab {
       }
       rpc.full_barrier();
     } // end of load random powerlaw
+
+    void write_synthetic_powerlaw(size_t nverts, bool in_degree = false,
+                                 double alpha = 2.1, size_t truncate = (size_t)(-1)) {
+      rpc.full_barrier();
+      std::vector<double> prob(std::min(nverts, truncate), 0);
+      logstream(LOG_INFO) << "constructing pdf" << std::endl;
+      for(size_t i = 0; i < prob.size(); ++i)
+        prob[i] = std::pow(double(i+1), -alpha);
+      logstream(LOG_INFO) << "constructing cdf" << std::endl;
+      random::pdf2cdf(prob);
+      logstream(LOG_INFO) << "Building graph" << std::endl;
+      size_t target_index = rpc.procid();
+      size_t addedvtx = 0;
+
+      // A large prime number
+      const size_t HASH_OFFSET = 2654435761;
+      for(size_t source = rpc.procid(); source < nverts;
+          source += rpc.numprocs()) {
+        const size_t out_degree = random::multinomial_cdf(prob) + 1;
+        for(size_t i = 0; i < out_degree; ++i) {
+          target_index = (target_index + HASH_OFFSET)  % nverts;
+          while (source == target_index) {
+            target_index = (target_index + HASH_OFFSET)  % nverts;
+          }
+          if(in_degree) write_edge(target_index, source);
+          else write_edge(source, target_index);
+        }
+        ++addedvtx;
+        if (addedvtx % 10000000 == 0) {
+          logstream(LOG_EMPH) << addedvtx << " inserted\n";
+        }
+      }
+      rpc.full_barrier();
+    } // end of write random powerlaw
 
 
     /**
