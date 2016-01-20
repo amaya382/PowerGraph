@@ -9,5 +9,5 @@ int main(int argc, char** argv){
   graphlab::command_line_options clopts("Graph generator");
   graph_type graph(dc, clopts);
   double alpha = argc >= 3 ? atof(argv[2]) : 2.1;
-  graph.write_synthetic_powerlaw(atol(argv[1]), false, alpha, 100000000);
+  graph.write_synthetic_powerlaw(atol(argv[1]), true, alpha, 100000000);
 }
